@@ -34,15 +34,6 @@ WITH
             apunte_contables ac
         WHERE
             ac.tipo_id = 30
-    ),    
-    Administracion AS (
-        SELECT
-            ac.*,
-            ROW_NUMBER() OVER (PARTITION BY ac.propiedad_id, ac.tipo_id ORDER BY ac.fecha_creacion DESC) AS rn
-        FROM
-            apunte_contables ac
-        WHERE
-            ac.tipo_id = 31
     )
 SELECT
     -- SKU
@@ -62,11 +53,17 @@ SELECT
     -- RENTABILIDAD
     FORMAT((
         (            
-            CASE WHEN ABS(a.importe) > 0 THEN ABS(a.importe) * 12 ELSE ABS(p.alquiler_estimado) * 12 END -
+            CASE WHEN ABS(a.importe) > 0 AND COALESCE(p.alquiler_habitaciones, 0) = 0 THEN ABS(a.importe) * 12 ELSE ABS(p.alquiler_estimado) * 12 END -
             CASE WHEN ABS(c.importe) > 0 THEN ABS(c.importe) * 12 ELSE ABS(p.comunidad) * 12 END -
-            CASE WHEN ABS(i.importe) > 0 THEN ABS(i.importe) ELSE ABS(p.ibi) END -
-            CASE WHEN ABS(s.importe) > 0 THEN ABS(s.importe) ELSE IFNULL(ABS(p.seguro_estimado), 0) END -
-            CASE WHEN ABS(ad.importe) > 0 THEN ABS(ad.importe) * 12 ELSE ABS(tpc.administracion) END
+            CASE WHEN ABS(i.importe) > 0 AND 
+            (
+                SELECT COUNT(*) AS 'total de asientos' 
+                FROM apunte_contables ac 
+                WHERE ac.tipo_id = 29 AND p.id = ac.propiedad_id
+            ) > 1
+            THEN ABS(i.importe) ELSE IFNULL(ABS(p.ibi), 0) END -
+            CASE WHEN ABS(s.importe) > 0 THEN ABS(s.importe) ELSE 200 END -
+            (ABS(tpc.administracion) * 12)
         ) / 
         (
             CASE WHEN m.pago_propiedad_bool = 'si' THEN IFNULL(m.pago_propiedad, 0) ELSE 0 END +
@@ -77,7 +74,7 @@ SELECT
             CASE WHEN m.reforma_licencia_bool = 'si' THEN IFNULL(m.reforma_licencia, 0) ELSE 0 END
         ) * 100
 
-    ), 2) AS 'Rentabilidad (%)',
+    ), 2) 'Rentabilidad (%)',
     -- TOTAL MOS
     FORMAT((
         CASE WHEN m.pago_propiedad_bool = 'si' THEN IFNULL(m.pago_propiedad, 0) ELSE 0 END +
@@ -86,35 +83,47 @@ SELECT
         CASE WHEN m.comision_venta_bool = 'si' THEN IFNULL(m.comision_venta, 0) ELSE 0 END +
         CASE WHEN m.otros_conceptos_bool = 'si' THEN IFNULL(m.otros_conceptos, 0) ELSE 0 END +
         CASE WHEN m.reforma_licencia_bool = 'si' THEN IFNULL(m.reforma_licencia, 0) ELSE 0 END
-    ), 2) AS 'Total inversión (€)',
+    ), 2) 'Total inversión (€)',
     -- RETORNO NETO    
     FORMAT((
-        CASE WHEN ABS(a.importe) > 0 THEN ABS(a.importe) * 12 ELSE ABS(p.alquiler_estimado) * 12 END -
+        CASE WHEN ABS(a.importe) > 0 AND COALESCE(p.alquiler_habitaciones, 0) = 0 THEN ABS(a.importe) * 12 ELSE ABS(p.alquiler_estimado) * 12 END -
         CASE WHEN ABS(c.importe) > 0 THEN ABS(c.importe) * 12 ELSE ABS(p.comunidad) * 12 END -
-        CASE WHEN ABS(i.importe) > 0 THEN ABS(i.importe) ELSE ABS(p.ibi) END -
-        CASE WHEN ABS(s.importe) > 0 THEN ABS(s.importe) ELSE IFNULL(ABS(p.seguro_estimado), 0) END -
-        CASE WHEN ABS(ad.importe) > 0 THEN ABS(ad.importe) * 12 ELSE ABS(tpc.administracion) END
-    ), 2) AS 'Retorno neto (€)',
+        CASE WHEN ABS(i.importe) > 0 AND 
+        (
+            SELECT COUNT(*) AS 'total de asientos' 
+            FROM apunte_contables ac 
+            WHERE ac.tipo_id = 29 AND p.id = ac.propiedad_id
+        ) > 1
+        THEN ABS(i.importe) ELSE IFNULL(ABS(p.ibi), 0) END -
+        CASE WHEN ABS(s.importe) > 0 THEN ABS(s.importe) ELSE 200 END -
+        (ABS(tpc.administracion) * 12)
+    ), 2) 'Retorno neto (€)',
     -- ALQUILER
     FORMAT((
-        CASE WHEN ABS(a.importe) > 0 THEN ABS(a.importe) ELSE ABS(p.alquiler_estimado) END
-    ), 2) AS 'Alquiler mensual (€)',
+        /* CASE WHEN ABS(a.importe) > 0 AND NOT NULL p.alquiler_habitaciones THEN ABS(a.importe) ELSE ABS(p.alquiler_estimado) END */
+        CASE WHEN ABS(a.importe) > 0 AND COALESCE(p.alquiler_habitaciones, 0) = 0 THEN ABS(a.importe) ELSE ABS(p.alquiler_estimado) END
+    ), 2) 'Alquiler mensual (€)',
     -- COMUNIDAD
     FORMAT((
         CASE WHEN ABS(c.importe) > 0 THEN ABS(c.importe) ELSE ABS(p.comunidad) END
-    ), 2) AS 'Comunidad mensual (€)',
+    ), 2) 'Comunidad mensual (€)',
     -- IBI
     FORMAT((
-        CASE WHEN ABS(i.importe) > 0 THEN ABS(i.importe) ELSE ABS(p.ibi) END
-    ), 2) AS 'IBI (€)',
+        /* CASE WHEN ABS(i.importe) > 0 THEN ABS(i.importe) ELSE ABS(p.ibi) END */
+        CASE WHEN ABS(i.importe) > 0 AND 
+        (
+            SELECT COUNT(*) AS 'total de asientos' 
+            FROM apunte_contables ac 
+            WHERE ac.tipo_id = 29 AND p.id = ac.propiedad_id
+        ) > 1
+        THEN ABS(i.importe) ELSE IFNULL(ABS(p.ibi), 0) END
+    ), 2) 'IBI (€)',
     -- SEGURO
     FORMAT((
-        CASE WHEN ABS(s.importe) > 0 THEN ABS(s.importe) ELSE IFNULL(ABS(p.seguro_estimado), 0) END
-    ), 2) AS 'Seguro (€)',
+        CASE WHEN ABS(s.importe) > 0 THEN ABS(s.importe) ELSE 200 END
+    ), 2) 'Seguro (€)',
     -- ADMINISTRACION
-    FORMAT((
-        CASE WHEN ABS(ad.importe) > 0 THEN ABS(ad.importe) * 12 ELSE ABS(tpc.administracion) * 12 END
-    ), 2) AS 'Administracion (€)',
+    ABS(tpc.administracion) 'Administracion mensual (€)',
     p.m2_construidos M2,
     p.habitaciones Hab,
     p.banos 'Baños',
@@ -128,6 +137,5 @@ LEFT JOIN Alquiler a ON p.id = a.propiedad_id AND a.rn = 1
 LEFT JOIN Comunidad c ON p.id = c.propiedad_id AND c.rn = 1
 LEFT JOIN IBI i ON p.id = i.propiedad_id AND i.rn = 1
 LEFT JOIN Seguro s ON p.id = s.propiedad_id AND s.rn = 1
-LEFT JOIN Administracion ad ON p.id = ad.propiedad_id AND ad.rn = 1
 WHERE p.activo = 1
 ORDER BY p.fecha_escritura DESC;
